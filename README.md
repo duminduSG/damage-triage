@@ -18,7 +18,7 @@ It's a small, complete slice of an AI-assisted claims workflow, built to show ho
 
 | Part | What it does |
 |---|---|
-| `apps/api` | NestJS REST API. Owns the domain and PostgreSQL. Validates uploads, de-duplicates by SHA-256, classifies, re-derives claim status in one transaction. |
+| `apps/api` | NestJS REST API. Owns the domain and PostgreSQL. Validates uploads, de-duplicates by SHA-256, classifies, then re-derives claim status under a row lock so concurrent uploads can't overwrite each other. |
 | `apps/bff` | GraphQL backend-for-frontend. Stateless; composes REST calls into the views the UI needs, and only fetches photos when a query asks for them. |
 | `apps/web` | Next.js (App Router) + shadcn/ui: create a claim, drop in photos, see per-photo results and a damage summary. |
 
@@ -67,7 +67,7 @@ CI runs all of it on every push, with PostgreSQL as a service container.
 
 ## Roadmap
 - Real vision provider behind `VisionProvider`, with an evaluation set to tune the review threshold
-- Database-side status recalculation to remove the concurrent-upload race noted in ADR 0003
+- Cleanup job for image files orphaned by a failed insert (ADR 0003)
 - Object storage (S3) behind `BlobStore`, and Terraform for the hosted setup
 
 ## How this was built

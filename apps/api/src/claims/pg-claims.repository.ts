@@ -1,6 +1,15 @@
 import { Pool } from 'pg';
-import { ClaimStatus } from '../domain/classification';
-import { Claim, ClaimsRepository, NewPhoto, Photo } from './claims.repository';
+import { Classification, ClaimStatus } from '../domain/classification';
+import {
+  Claim,
+  ClaimNotFoundError,
+  ClaimsRepository,
+  DuplicatePhotoError,
+  NewPhoto,
+  Photo,
+} from './claims.repository';
+
+const UNIQUE_VIOLATION = '23505';
 
 const toClaim = (r: any): Claim => ({
   id: r.id,
@@ -61,26 +70,47 @@ export class PgClaimsRepository implements ClaimsRepository {
     return rows[0] ? toPhoto(rows[0]) : null;
   }
 
-  async addPhoto(photo: NewPhoto, newStatus: ClaimStatus): Promise<Photo> {
+  async addPhotoAndRetriage(photo: NewPhoto, decide: (all: Classification[]) => ClaimStatus) {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      const { rows } = await client.query(
-        `INSERT INTO photos (id, claim_id, filename, mime_type, size_bytes, sha256, classification)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [
-          photo.id,
-          photo.claimId,
-          photo.filename,
-          photo.mimeType,
-          photo.sizeBytes,
-          photo.sha256,
-          JSON.stringify(photo.classification),
-        ],
+
+      // A second upload to the same claim waits here until this transaction commits.
+      const locked = await client.query(`SELECT id FROM claims WHERE id = $1 FOR UPDATE`, [
+        photo.claimId,
+      ]);
+      if (locked.rowCount === 0) throw new ClaimNotFoundError(photo.claimId);
+
+      const inserted = await client
+        .query(
+          `INSERT INTO photos (id, claim_id, filename, mime_type, size_bytes, sha256, classification)
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+          [
+            photo.id,
+            photo.claimId,
+            photo.filename,
+            photo.mimeType,
+            photo.sizeBytes,
+            photo.sha256,
+            JSON.stringify(photo.classification),
+          ],
+        )
+        .catch((err) => {
+          if (err.code === UNIQUE_VIOLATION) throw new DuplicatePhotoError(photo.sha256);
+          throw err;
+        });
+
+      const all = await client.query(`SELECT classification FROM photos WHERE claim_id = $1`, [
+        photo.claimId,
+      ]);
+      const status = decide(all.rows.map((r) => r.classification));
+      const updated = await client.query(
+        `UPDATE claims SET status = $1 WHERE id = $2 RETURNING *`,
+        [status, photo.claimId],
       );
-      await client.query(`UPDATE claims SET status = $1 WHERE id = $2`, [newStatus, photo.claimId]);
+
       await client.query('COMMIT');
-      return toPhoto(rows[0]);
+      return { photo: toPhoto(inserted.rows[0]), claim: toClaim(updated.rows[0]) };
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

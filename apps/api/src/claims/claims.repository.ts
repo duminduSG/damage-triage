@@ -1,5 +1,8 @@
 import { Classification, ClaimStatus } from '../domain/classification';
 
+export class ClaimNotFoundError extends Error {}
+export class DuplicatePhotoError extends Error {}
+
 export interface Claim {
   id: string;
   reference: string;
@@ -27,8 +30,12 @@ export interface ClaimsRepository {
   listClaims(limit: number): Promise<Claim[]>;
   listPhotos(claimId: string): Promise<Photo[]>;
   findPhotoByHash(claimId: string, sha256: string): Promise<Photo | null>;
-  // inserts the photo and updates claim status in one transaction
-  addPhoto(photo: NewPhoto, newStatus: ClaimStatus): Promise<Photo>;
+  // Inserts the photo, then works out the status from *all* the claim's photos while the
+  // claim is locked, so concurrent uploads can't overwrite each other's result.
+  addPhotoAndRetriage(
+    photo: NewPhoto,
+    decide: (all: Classification[]) => ClaimStatus,
+  ): Promise<{ photo: Photo; claim: Claim }>;
 }
 
 export const CLAIMS_REPOSITORY = Symbol('CLAIMS_REPOSITORY');

@@ -1,5 +1,12 @@
-import { ClaimStatus } from '../domain/classification';
-import { Claim, ClaimsRepository, NewPhoto, Photo } from './claims.repository';
+import { Classification, ClaimStatus } from '../domain/classification';
+import {
+  Claim,
+  ClaimNotFoundError,
+  ClaimsRepository,
+  DuplicatePhotoError,
+  NewPhoto,
+  Photo,
+} from './claims.repository';
 
 export class InMemoryClaimsRepository implements ClaimsRepository {
   private claims = new Map<string, Claim>();
@@ -32,11 +39,19 @@ export class InMemoryClaimsRepository implements ClaimsRepository {
     return this.photos.find((p) => p.claimId === claimId && p.sha256 === sha256) ?? null;
   }
 
-  async addPhoto(photo: NewPhoto, newStatus: ClaimStatus): Promise<Photo> {
+  // No awaits between reading and writing, so this runs atomically on the event loop.
+  async addPhotoAndRetriage(photo: NewPhoto, decide: (all: Classification[]) => ClaimStatus) {
+    const claim = this.claims.get(photo.claimId);
+    if (!claim) throw new ClaimNotFoundError(photo.claimId);
+    if (this.photos.some((p) => p.claimId === photo.claimId && p.sha256 === photo.sha256)) {
+      throw new DuplicatePhotoError(photo.sha256);
+    }
+
     const saved = { ...photo, createdAt: new Date() };
     this.photos.push(saved);
-    const claim = this.claims.get(photo.claimId)!;
-    this.claims.set(claim.id, { ...claim, status: newStatus });
-    return saved;
+    const all = this.photos.filter((p) => p.claimId === claim.id).map((p) => p.classification);
+    const updated = { ...claim, status: decide(all) };
+    this.claims.set(claim.id, updated);
+    return { photo: saved, claim: updated };
   }
 }

@@ -22,6 +22,16 @@ Photos classified as `none` don't count toward the confidence check. Claims ofte
 - The threshold is validated at startup: anything outside 0 to 1 stops the app rather than silently misbehaving.
 - Adding another always-review type (e.g. `mould`, a health risk) is a one-word change to the policy.
 
-## Known limitations (deliberate for v1)
-- Status is re-derived per upload in the service. Two concurrent uploads to the same claim could race. A database-side recalculation or a row lock on the claim would close this.
+## Concurrency
+Status used to be worked out from a snapshot of the claim's photos taken *before* saving. Two uploads to the same claim at the same moment could each miss the other's photo, and the last write won: a severe photo could end up on a claim marked `triaged` (a lost update).
+
+Now the repository inserts the photo and re-derives the status from **all** of the claim's photos inside one transaction that holds a row lock on the claim (`SELECT ... FOR UPDATE`). A second upload to the same claim waits for the first to commit. Uploads to different claims don't block each other.
+
+The vision model call happens **before** the transaction, so the lock is held for a few milliseconds of SQL rather than for a slow network call.
+
+Two identical photos racing each other both pass the early duplicate check. The database's unique constraint stops the second one, and the repository reports it as a duplicate (409), not a server error.
+
+Tests reproduce both races: an HTTP test with deliberately slow storage, and a PostgreSQL test that fires concurrent uploads. The PostgreSQL test fails if the `FOR UPDATE` is removed.
+
+## Known limitations
 - Image bytes are written before the database insert. A failed insert can leave an orphaned file, which a cleanup job would collect.

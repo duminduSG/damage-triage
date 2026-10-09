@@ -4,7 +4,14 @@ import { TriagePolicy, triageStatus } from '../domain/classification';
 import { BLOB_STORE, BlobStore } from '../storage/blob-store';
 import { TRIAGE_POLICY } from '../domain/triage-policy.token';
 import { VISION_PROVIDER, VisionProvider } from '../vision/vision-provider';
-import { CLAIMS_REPOSITORY, Claim, ClaimsRepository, Photo } from './claims.repository';
+import {
+  CLAIMS_REPOSITORY,
+  Claim,
+  ClaimNotFoundError,
+  ClaimsRepository,
+  DuplicatePhotoError,
+  Photo,
+} from './claims.repository';
 
 export interface UploadedImage {
   originalname: string;
@@ -37,42 +44,46 @@ export class ClaimsService {
   }
 
   async addPhoto(claimId: string, file: UploadedImage): Promise<{ photo: Photo; claim: Claim }> {
-    const claim = await this.repo.findClaim(claimId);
-    if (!claim) throw new NotFoundException(`Claim ${claimId} not found`);
+    if (!(await this.repo.findClaim(claimId))) {
+      throw new NotFoundException(`Claim ${claimId} not found`);
+    }
 
-    // same photo twice shouldn't count as extra evidence
+    // Same photo twice shouldn't count as extra evidence. Checking early saves a model
+    // call; the unique constraint still catches two identical uploads racing each other.
     const sha256 = createHash('sha256').update(file.buffer).digest('hex');
     if (await this.repo.findPhotoByHash(claimId, sha256)) {
       throw new ConflictException('This photo is already attached to the claim');
     }
 
+    // The model call is the slow part, so it happens before we take the claim lock.
     const classification = await this.vision.classify({
       bytes: file.buffer,
       mimeType: file.mimetype,
       sha256,
     });
 
-    const existing = await this.repo.listPhotos(claimId);
-    const status = triageStatus(
-      [...existing.map((p) => p.classification), classification],
-      this.policy,
-    );
-
     const id = randomUUID();
     // TODO: orphaned file if the insert below fails (ADR 0003)
     await this.blobs.put(id, file.buffer);
-    const photo = await this.repo.addPhoto(
-      {
-        id,
-        claimId,
-        filename: file.originalname,
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
-        sha256,
-        classification,
-      },
-      status,
-    );
-    return { photo, claim: { ...claim, status } };
+    try {
+      return await this.repo.addPhotoAndRetriage(
+        {
+          id,
+          claimId,
+          filename: file.originalname,
+          mimeType: file.mimetype,
+          sizeBytes: file.size,
+          sha256,
+          classification,
+        },
+        (all) => triageStatus(all, this.policy),
+      );
+    } catch (err) {
+      if (err instanceof DuplicatePhotoError) {
+        throw new ConflictException('This photo is already attached to the claim');
+      }
+      if (err instanceof ClaimNotFoundError) throw new NotFoundException(`Claim ${claimId} not found`);
+      throw err;
+    }
   }
 }
