@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/duminduSG/damage-triage/actions/workflows/ci.yml/badge.svg)](https://github.com/duminduSG/damage-triage/actions/workflows/ci.yml)
 
-Upload photos of property damage to a claim, have each photo classified (damage type, severity, confidence), and let the claim triage itself: confident, non-severe claims are marked **triaged**, and anything severe or uncertain goes to a person as **needs review**.
+Upload photos of property damage to a claim, have each photo classified (damage type, severity, confidence), and let the claim triage itself. Confident, non-severe claims are marked **triaged**. Anything severe, uncertain, fire-related, or showing no visible damage at all goes to a person as **needs review** ([rules](docs/decisions/0003-humans-own-severe-and-uncertain-results.md)).
 
 It's a small, complete slice of an AI-assisted claims workflow, built to show how I structure a full-stack TypeScript service: clear boundaries, plain SQL, tests at every layer, and decisions written down.
 

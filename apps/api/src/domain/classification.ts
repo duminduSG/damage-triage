@@ -14,13 +14,45 @@ export interface Classification {
 
 export type ClaimStatus = 'open' | 'triaged' | 'needs_review';
 
-export const REVIEW_CONFIDENCE_THRESHOLD = 0.6;
+export interface TriagePolicy {
+  reviewConfidenceThreshold: number;
+  alwaysReviewTypes: readonly DamageType[];
+}
 
-// Anything severe or low-confidence goes to a person. See ADR 0003.
-export function triageStatus(classifications: readonly Classification[]): ClaimStatus {
+export const DEFAULT_TRIAGE_POLICY: TriagePolicy = {
+  reviewConfidenceThreshold: 0.6,
+  // fire: smoke/structural/electrical damage rarely shows fully in a photo
+  alwaysReviewTypes: ['fire'],
+};
+
+// See ADR 0003.
+export function triageStatus(
+  classifications: readonly Classification[],
+  policy: TriagePolicy = DEFAULT_TRIAGE_POLICY,
+): ClaimStatus {
   if (classifications.length === 0) return 'open';
-  const needsReview = classifications.some(
-    (c) => c.severity === 'severe' || c.confidence < REVIEW_CONFIDENCE_THRESHOLD,
+
+  // 'none' photos are often context shots (front of house etc), so their
+  // confidence doesn't matter. But if nothing shows damage at all, someone should look.
+  const damaged = classifications.filter((c) => c.damageType !== 'none');
+  if (damaged.length === 0) return 'needs_review';
+
+  const needsReview = damaged.some(
+    (c) =>
+      c.severity === 'severe' ||
+      c.confidence < policy.reviewConfidenceThreshold ||
+      policy.alwaysReviewTypes.includes(c.damageType),
   );
   return needsReview ? 'needs_review' : 'triaged';
+}
+
+export function triagePolicyFromEnv(env: NodeJS.ProcessEnv = process.env): TriagePolicy {
+  const raw = env.REVIEW_CONFIDENCE_THRESHOLD;
+  if (raw === undefined || raw === '') return DEFAULT_TRIAGE_POLICY;
+
+  const threshold = Number(raw);
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+    throw new Error(`REVIEW_CONFIDENCE_THRESHOLD must be a number between 0 and 1, got "${raw}"`);
+  }
+  return { ...DEFAULT_TRIAGE_POLICY, reviewConfidenceThreshold: threshold };
 }

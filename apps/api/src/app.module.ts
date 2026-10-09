@@ -1,5 +1,7 @@
 import { DynamicModule, Module } from '@nestjs/common';
 import { Pool } from 'pg';
+import { DEFAULT_TRIAGE_POLICY, TriagePolicy, triagePolicyFromEnv } from './domain/classification';
+import { TRIAGE_POLICY } from './domain/triage-policy.token';
 import { ClaimsController } from './claims/claims.controller';
 import { CLAIMS_REPOSITORY, ClaimsRepository } from './claims/claims.repository';
 import { ClaimsService } from './claims/claims.service';
@@ -12,6 +14,7 @@ export interface AppDeps {
   repository: ClaimsRepository;
   vision: VisionProvider;
   blobs: BlobStore;
+  policy?: TriagePolicy;
 }
 
 export function visionFromEnv(name = process.env.VISION_PROVIDER ?? 'mock'): VisionProvider {
@@ -30,6 +33,7 @@ export function depsFromEnv(): AppDeps {
     repository: new PgClaimsRepository(new Pool({ connectionString: url })),
     vision: visionFromEnv(),
     blobs: new LocalBlobStore(process.env.UPLOAD_DIR ?? './uploads'),
+    policy: triagePolicyFromEnv(),
   };
 }
 
@@ -45,6 +49,7 @@ export class AppModule {
         { provide: CLAIMS_REPOSITORY, useValue: deps.repository },
         { provide: VISION_PROVIDER, useValue: deps.vision },
         { provide: BLOB_STORE, useValue: deps.blobs },
+        { provide: TRIAGE_POLICY, useValue: deps.policy ?? DEFAULT_TRIAGE_POLICY },
       ],
     };
   }

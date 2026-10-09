@@ -1,7 +1,8 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
-import { triageStatus } from '../domain/classification';
+import { TriagePolicy, triageStatus } from '../domain/classification';
 import { BLOB_STORE, BlobStore } from '../storage/blob-store';
+import { TRIAGE_POLICY } from '../domain/triage-policy.token';
 import { VISION_PROVIDER, VisionProvider } from '../vision/vision-provider';
 import { CLAIMS_REPOSITORY, Claim, ClaimsRepository, Photo } from './claims.repository';
 
@@ -18,6 +19,7 @@ export class ClaimsService {
     @Inject(CLAIMS_REPOSITORY) private readonly repo: ClaimsRepository,
     @Inject(VISION_PROVIDER) private readonly vision: VisionProvider,
     @Inject(BLOB_STORE) private readonly blobs: BlobStore,
+    @Inject(TRIAGE_POLICY) private readonly policy: TriagePolicy,
   ) {}
 
   createClaim(reference: string, address: string): Promise<Claim> {
@@ -51,7 +53,10 @@ export class ClaimsService {
     });
 
     const existing = await this.repo.listPhotos(claimId);
-    const status = triageStatus([...existing.map((p) => p.classification), classification]);
+    const status = triageStatus(
+      [...existing.map((p) => p.classification), classification],
+      this.policy,
+    );
 
     const id = randomUUID();
     // TODO: orphaned file if the insert below fails (ADR 0003)
