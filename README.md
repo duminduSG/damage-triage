@@ -71,7 +71,7 @@ CI runs all of it on every push, with PostgreSQL as a service container.
 - Object storage (S3) behind `BlobStore`, and Terraform for the hosted setup
 
 ## How this was built
-I wrote this with Claude Code as a coding assistant. The architecture, boundaries and trade-offs are mine, and I can walk through any line of it.
+I built this with Claude Code as a coding assistant. I made the architecture and trade-off decisions, which are written up in the ADRs.
 
 ## License
 MIT
